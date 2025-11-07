@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="MFDX12EncoderSampleLeak/MFDX12EncoderSampleLeak.vcxproj" Id="0e8cbe0a-ee4a-4573-844d-f88ff0df85b4" />
+</Solution>
