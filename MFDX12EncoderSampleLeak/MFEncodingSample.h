@@ -1,4 +1,5 @@
 #pragma once
+
 class MFEncodingSample
 {
 public:
@@ -6,6 +7,7 @@ public:
 private:
     void Log(winrt::hstring const& msg);
     void InitializeMFObjects();
+    void RegisterLocalMFT();
     void CreateSourceReader();
     void CreateSinkWriter(const wchar_t* filename);
     void RemoveSinkWriter();

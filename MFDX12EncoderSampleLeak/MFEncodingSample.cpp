@@ -4,6 +4,70 @@
 
 using namespace winrt;
 
+// CLSID for the DX12 H.264 Encoder
+DEFINE_GUID(CLSID_CDX12EncoderHMFT, 0x8994db7c, 0x288a, 0x4c62, 0xa1, 0x36, 0xa3, 0xc3, 0xc2, 0xa2, 0x08, 0xa8);
+
+// IClassFactory implementation for the local MFT
+class LocalMFTClassFactory : public winrt::implements<LocalMFTClassFactory, IClassFactory>
+{
+private:
+	HMODULE m_hModule = nullptr;
+
+public:
+	LocalMFTClassFactory() = default;
+
+	~LocalMFTClassFactory()
+	{
+		if (m_hModule)
+		{
+			FreeLibrary(m_hModule);
+		}
+	}
+
+	HRESULT STDMETHODCALLTYPE CreateInstance(IUnknown* pUnkOuter, REFIID riid, void** ppvObject) override
+	{
+		if (!ppvObject)
+			return E_POINTER;
+
+		*ppvObject = nullptr;
+
+		// Load the MFT DLL
+		if (!m_hModule)
+		{
+			m_hModule = LoadLibraryW(L"msh264enchmft.dll");
+			if (!m_hModule)
+			{
+				return HRESULT_FROM_WIN32(GetLastError());
+			}
+		}
+
+		// Get DllGetClassObject export from the DLL
+		typedef HRESULT(STDAPICALLTYPE* PFnDllGetClassObject)(REFCLSID, REFIID, LPVOID*);
+		PFnDllGetClassObject pfnGetClassObject = (PFnDllGetClassObject)GetProcAddress(m_hModule, "DllGetClassObject");
+
+		if (!pfnGetClassObject)
+		{
+			return E_FAIL;
+		}
+
+		// Get the class factory from the DLL for the CLSID
+		com_ptr<IClassFactory> dllClassFactory;
+		HRESULT hr = pfnGetClassObject(CLSID_CDX12EncoderHMFT, IID_IClassFactory, (void**)dllClassFactory.put());
+		if (FAILED(hr))
+		{
+			return hr;
+		}
+
+		// Use the DLL's class factory to create the actual MFT instance
+		return dllClassFactory->CreateInstance(pUnkOuter, riid, ppvObject);
+	}
+
+	HRESULT STDMETHODCALLTYPE LockServer(BOOL fLock) override
+	{
+		return S_OK;
+	}
+};
+
 void MFEncodingSample::Log(hstring const& msg)
 {
 	OutputDebugStringW(msg.c_str());
@@ -54,6 +118,9 @@ void MFEncodingSample::InitializeMFObjects()
 {
 	THROW_IF_FAILED(MFStartup(MF_VERSION, MFSTARTUP_FULL));
 
+	// Register the local MFT before creating devices
+	RegisterLocalMFT();
+
 	com_ptr<ID3D11Device> device;
 	D3D_FEATURE_LEVEL lvl;
 	UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
@@ -61,6 +128,53 @@ void MFEncodingSample::InitializeMFObjects()
 
 	THROW_IF_FAILED(MFCreateDXGIDeviceManager(&m_resetToken, m_dxgiManager.put()));
 	THROW_IF_FAILED(m_dxgiManager->ResetDevice(device.get(), m_resetToken));
+}
+
+void MFEncodingSample::RegisterLocalMFT()
+{
+	try
+	{
+		Log(L"Registering local MFT (CDX12EncoderHMFT)...");
+
+		// Create the IClassFactory implementation for our MFT
+		com_ptr<IClassFactory> classFactory = winrt::make<LocalMFTClassFactory>();
+
+		// Define input and output types for the encoder
+		MFT_REGISTER_TYPE_INFO inputInfo{};
+		inputInfo.guidMajorType = MFMediaType_Video;
+		inputInfo.guidSubtype = MFVideoFormat_NV12;
+
+		MFT_REGISTER_TYPE_INFO outputInfo{};
+		outputInfo.guidMajorType = MFMediaType_Video;
+		outputInfo.guidSubtype = MFVideoFormat_H264;
+
+		// Register the MFT locally in the current process
+		// This does NOT require registry entries - the class factory handles instantiation
+		THROW_IF_FAILED(MFTRegisterLocal(
+			classFactory.get(),
+			MFT_CATEGORY_VIDEO_ENCODER,
+			L"DX12 H.264 Encoder",
+			0,  // Flags
+			1,  // Number of input types
+			&inputInfo,
+			1,  // Number of output types
+			&outputInfo
+		));
+
+		Log(L"Local MFT registered successfully");
+	}
+	catch (wil::ResultException const& e)
+	{
+		std::wstring ws;
+		ws.assign(e.what(), e.what() + strlen(e.what()));
+		Log(L"Failed to register local MFT: " + hstring(ws));
+		throw;
+	}
+	catch (...)
+	{
+		Log(L"Failed to register local MFT (unknown error)");
+		throw;
+	}
 }
 
 static com_ptr<IMFActivate> GetFirstVideoCaptureDevice()

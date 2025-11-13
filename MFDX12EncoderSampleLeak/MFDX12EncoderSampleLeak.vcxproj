@@ -113,6 +113,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <None Include="msh264enchmft.dll">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
     <None Include="packages.config" />
     <None Include="PropertySheet.props" />
   </ItemGroup>
